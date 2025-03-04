@@ -1,0 +1,215 @@
+-- TD明细-累计
+with a as (
+SELECT DT.烽火台订单号 订单号 ,
+       DT.TD人员,
+       RPA.客户id,
+       FH.日期_公式生成,
+       FH.城市,
+       fh.商家ID,
+       fh.商家名称,
+       fh.下单时间,
+       STR_TO_DATE(fh.下单时间, '%Y-%m-%d %H:%i:%s') AS formatted_datetime,
+       TIMESTAMPDIFF(MINUTE,
+                   STR_TO_DATE(fh.下单时间, '%Y-%m-%d %H:%i:%s'),
+                   lead(fh.下单时间) over (partition by FH.商家ID,fh.日期_公式生成,fh.城市 ORDER BY FH.下单时间 ASC, FH.商家ID desc,FH.城市 desc,FH.日期_公式生成 )) 下单时间间隔,
+       count(RPA.客户id) over (partition by fh.城市,replace(substr(fh.日期_公式生成,1,7),'-',''),RPA.客户id) AS 客户ID累计出现次数,
+       count(RPA.客户id) over (partition by fh.城市,RPA.客户id,FH.日期_公式生成 ) AS 当日下单次数,
+       CASE WHEN ABS(FH.日期_公式生成 - LEAD(fh.日期_公式生成) over (partition by RPA.客户id order by FH.下单时间 ASC, FH.商家ID desc,FH.城市 desc,FH.日期_公式生成)) < 2 THEN '否'
+            WHEN ABS(FH.日期_公式生成 - LEAD(fh.日期_公式生成) over (partition by RPA.客户id order by FH.下单时间 ASC, FH.商家ID desc,FH.城市 desc,FH.日期_公式生成)) IS NULL  THEN '是'
+           ELSE '是'
+           END AS 同一客户ID下单间隔天数是否达标,
+       COUNT(RPA.客户id) OVER (PARTITION BY fh.城市, RPA.客户id ORDER BY FH.日期_公式生成 ASC range BETWEEN INTERVAL 2 DAY PRECEDING AND CURRENT ROW ) AS 近三天出现次数,
+       COUNT(RPA.客户id) OVER (PARTITION BY fh.城市, RPA.客户id ORDER BY FH.日期_公式生成 ASC range BETWEEN INTERVAL 6 DAY PRECEDING AND CURRENT ROW ) AS 近七天出现次数,
+       case when fh.导航距离 >= 1000 then '合规'
+            else fh.导航距离
+           end AS 收餐地址距离商家导航距离,
+        case when  count(DT.城市) over (partition by fh.城市,fh.商家ID,fh.日期_公式生成)  <  (sj.订单量（GMV） * 0.5) then '是'
+            else '否'
+           end AS 单商家当日TD量是否合规,
+    CASE WHEN (CASE WHEN IFNULL(j30.原价交易额,0)=0 OR IFNULL(j30.营业天数,0)=0 then 0 ELSE SUM(FH.订单原价) over (partition by fh.商家ID,fh.日期_公式生成) /j30.原价交易额/j30.营业天数 -1 END )>1 THEN '否' ELSE '是' end 单商家当日TD原价GMV是否合规,
+        case when yc.商家id is not null then '是' else '否' end as 是否风控商家,   -- 是否近1个月风控商家
+        fh.订单原价,
+        COUNT(FH.订单原价) OVER (partition by fh.商家ID,fh.日期_公式生成,FH.城市) AS 同一商家TD原价重复次数,
+        fh.订单金额,
+        CASE WHEN  IFNULL(fh.订单原价,0) = 0 THEN 0 ELSE  (fh.订单原价-fh.订单金额) / fh.订单原价 END as 折扣力度,
+        FH.骑手,
+        FH.送达时间,
+       case when  TIMESTAMPDIFF(MINUTE,STR_TO_DATE(fh.下单时间, '%Y-%m-%d %H:%i:%s'), STR_TO_DATE(FH.送达时间, '%Y-%m-%d %H:%i:%s')) >=20 then '合规' ELSE TIMESTAMPDIFF(MINUTE,STR_TO_DATE(fh.下单时间, '%Y-%m-%d %H:%i:%s'), STR_TO_DATE(FH.送达时间, '%Y-%m-%d %H:%i:%s')) end AS 配送时长,
+       case when  TIMESTAMPDIFF(MINUTE , STR_TO_DATE(FH.接单时间, '%Y-%m-%d %H:%i:%s'),STR_TO_DATE(fh.取货时间, '%Y-%m-%d %H:%i:%s'))>= 8 then '合规' ELSE TIMESTAMPDIFF(MINUTE , STR_TO_DATE(FH.接单时间, '%Y-%m-%d %H:%i:%s'),STR_TO_DATE(fh.取货时间, '%Y-%m-%d %H:%i:%s')) end AS 取餐时长,
+       CASE WHEN  RPA.系统识别骑手到店米 <= 50 THEN '合规' ELSE RPA.系统识别骑手到店米 end AS 骑手上报到店距离,
+       CASE WHEN RPA.联系顾客 = '是' THEN '是' ELSE '否' end AS 送达前是否联系客户,
+       CASE WHEN RPA.改派或转单 = '是' THEN '是' ELSE '否' end AS 是否有转单或改派情况,
+       CASE WHEN RPA.骑手已操作送达米 <= 50 THEN '合规' ELSE RPA.骑手已操作送达米 end AS 骑手操作送达距离,
+       CASE WHEN RPA.骑手已操作送达是否上报异常 = '是' THEN '是' ELSE '否' end AS 是否有上报异常情况,
+       CASE WHEN (CASE WHEN RPA.骑手已操作送达米 <= 50 THEN '合规' ELSE RPA.骑手已操作送达米 end <> '合规' and CASE WHEN RPA.骑手已操作送达是否上报异常 = '是' THEN '是' ELSE '否' end = '否')
+                     or
+                 case when  TIMESTAMPDIFF(MINUTE,STR_TO_DATE(fh.下单时间, '%Y-%m-%d %H:%i:%s'), STR_TO_DATE(FH.送达时间, '%Y-%m-%d %H:%i:%s')) >=20 then '合规' ELSE TIMESTAMPDIFF(MINUTE,STR_TO_DATE(fh.下单时间, '%Y-%m-%d %H:%i:%s'), STR_TO_DATE(FH.送达时间, '%Y-%m-%d %H:%i:%s')) end <> '合规'
+             OR CASE WHEN  RPA.系统识别骑手到店米 <= 50 THEN '合规' ELSE RPA.系统识别骑手到店米 end <> '合规'
+             OR case when  TIMESTAMPDIFF(MINUTE , STR_TO_DATE(FH.接单时间, '%Y-%m-%d %H:%i:%s'),STR_TO_DATE(fh.取货时间, '%Y-%m-%d %H:%i:%s'))>= 8 then '合规' ELSE TIMESTAMPDIFF(MINUTE , STR_TO_DATE(FH.接单时间, '%Y-%m-%d %H:%i:%s'),STR_TO_DATE(fh.取货时间, '%Y-%m-%d %H:%i:%s')) end  <> '合规'
+             OR CASE WHEN RPA.联系顾客 = '是' THEN '是' ELSE '否' end  = '否'
+             or CASE WHEN RPA.改派或转单 = '是' THEN '是' ELSE '否' end = '是'
+then '否'
+else '是' end AS 是否配送合规,
+    case when
+        CASE WHEN ABS(FH.日期_公式生成 - LEAD(fh.日期_公式生成) over (partition by RPA.客户id order by FH.下单时间 ASC, FH.商家ID desc,FH.城市 desc,FH.日期_公式生成)) < 2 THEN '否'
+            WHEN ABS(FH.日期_公式生成 - LEAD(fh.日期_公式生成) over (partition by RPA.客户id order by FH.下单时间 ASC, FH.商家ID desc,FH.城市 desc,FH.日期_公式生成)) IS NULL  THEN '是'
+           ELSE '是'
+           END = '否'
+    or COUNT(RPA.客户id) OVER (PARTITION BY fh.城市, RPA.客户id ORDER BY FH.日期_公式生成 ASC range BETWEEN INTERVAL 2 DAY PRECEDING AND CURRENT ROW )  > 2
+    OR COUNT(RPA.客户id) OVER (PARTITION BY fh.城市, RPA.客户id ORDER BY FH.日期_公式生成 ASC range BETWEEN INTERVAL 6 DAY PRECEDING AND CURRENT ROW )  > 4
+    OR case when fh.导航距离 >= 1000 then '合规'
+            else fh.导航距离
+           end < 1000
+        THEN '否' else '是' end AS 是否下单合规,
+
+    case when
+            case when  count(DT.城市) over (partition by fh.城市,fh.商家ID,fh.日期_公式生成)  <  (sj.订单量（GMV） * 0.5) then '是'
+            else '否'
+           end = '否'
+            or
+            CASE WHEN (CASE WHEN IFNULL(j30.原价交易额,0)=0 OR IFNULL(j30.营业天数,0)=0 then 0 ELSE SUM(FH.订单原价) over (partition by fh.商家ID,fh.日期_公式生成) /j30.原价交易额/j30.营业天数 -1 END )>1 THEN '否' ELSE '是' end = '否'
+            OR  case when yc.商家id is not null then '是' else '否' end = '是'       -- 风控商家等于 是
+            or COUNT(FH.订单原价) OVER (partition by fh.商家ID,fh.日期_公式生成,FH.城市) > 2
+            OR
+            TIMESTAMPDIFF(MINUTE,
+                   STR_TO_DATE(fh.下单时间, '%Y-%m-%d %H:%i:%s'),
+                   lead(fh.下单时间) over (partition by FH.商家ID,fh.日期_公式生成,fh.城市 ORDER BY FH.下单时间 ASC, FH.商家ID desc,FH.城市 desc,FH.日期_公式生成 )) < 20
+            OR (fh.订单原价 > 180) then '否' else '是' end AS 是否商家端合规,
+            --   是否合规订单
+            case when (CASE WHEN (CASE WHEN RPA.骑手已操作送达米 <= 50 THEN '合规' ELSE RPA.骑手已操作送达米 end <> '合规' and CASE WHEN RPA.骑手已操作送达是否上报异常 = '是' THEN '是' ELSE '否' end = '否')
+                or
+                                 case when  TIMESTAMPDIFF(MINUTE,STR_TO_DATE(fh.下单时间, '%Y-%m-%d %H:%i:%s'), STR_TO_DATE(FH.送达时间, '%Y-%m-%d %H:%i:%s')) >=20 then '合规' ELSE TIMESTAMPDIFF(MINUTE,STR_TO_DATE(fh.下单时间, '%Y-%m-%d %H:%i:%s'), STR_TO_DATE(FH.送达时间, '%Y-%m-%d %H:%i:%s')) end <> '合规'
+                OR CASE WHEN  RPA.系统识别骑手到店米 <= 50 THEN '合规' ELSE RPA.系统识别骑手到店米 end <> '合规'
+                OR case when  TIMESTAMPDIFF(MINUTE , STR_TO_DATE(FH.接单时间, '%Y-%m-%d %H:%i:%s'),STR_TO_DATE(fh.取货时间, '%Y-%m-%d %H:%i:%s'))>= 8 then '合规' ELSE TIMESTAMPDIFF(MINUTE , STR_TO_DATE(FH.接单时间, '%Y-%m-%d %H:%i:%s'),STR_TO_DATE(fh.取货时间, '%Y-%m-%d %H:%i:%s')) end  <> '合规'
+                OR CASE WHEN RPA.联系顾客 = '是' THEN '是' ELSE '否' end  = '否'
+                or CASE WHEN RPA.改派或转单 = '是' THEN '是' ELSE '否' end = '是'
+                                then '否'
+                            else '是' end) = '否'
+                   OR (case when
+                                CASE WHEN ABS(FH.日期_公式生成 - LEAD(fh.日期_公式生成) over (partition by RPA.客户id order by FH.下单时间 ASC, FH.商家ID desc,FH.城市 desc,FH.日期_公式生成)) < 2 THEN '否'
+                                     WHEN ABS(FH.日期_公式生成 - LEAD(fh.日期_公式生成) over (partition by RPA.客户id order by FH.下单时间 ASC, FH.商家ID desc,FH.城市 desc,FH.日期_公式生成)) IS NULL  THEN '是'
+                                     ELSE '是'
+                                    END = '否'
+                                    or COUNT(RPA.客户id) OVER (PARTITION BY fh.城市, RPA.客户id ORDER BY FH.日期_公式生成 ASC range BETWEEN INTERVAL 2 DAY PRECEDING AND CURRENT ROW )  > 2
+                                    OR COUNT(RPA.客户id) OVER (PARTITION BY fh.城市, RPA.客户id ORDER BY FH.日期_公式生成 ASC range BETWEEN INTERVAL 6 DAY PRECEDING AND CURRENT ROW )  > 4
+                                    OR case when fh.导航距离 >= 1000 then '合规'
+                                            else fh.导航距离
+                                           end < 1000
+                                THEN '否' else '是' end) = '否'
+                   OR (case when
+                                case when  count(DT.城市) over (partition by fh.城市,fh.商家ID,fh.日期_公式生成)  <  (sj.订单量（GMV） * 0.5) then '是'
+                                     else '否'
+                                    end = '否'
+                                    or
+                                CASE WHEN (CASE WHEN IFNULL(j30.原价交易额,0)=0 OR IFNULL(j30.营业天数,0)=0 then 0 ELSE SUM(FH.订单原价) over (partition by fh.商家ID,fh.日期_公式生成) /j30.原价交易额/j30.营业天数 -1 END )>1 THEN '否' ELSE '是' end = '否'
+                                    OR  case when yc.商家id is not null then '是' else '否' end = '是'       -- 风控商家等于 是
+                                    or COUNT(FH.订单原价) OVER (partition by fh.商家ID,fh.日期_公式生成,FH.城市) > 2
+                                    OR
+                                TIMESTAMPDIFF(MINUTE,
+                                              STR_TO_DATE(fh.下单时间, '%Y-%m-%d %H:%i:%s'),
+                                              lead(fh.下单时间) over (partition by FH.商家ID,fh.日期_公式生成,fh.城市 ORDER BY FH.下单时间 ASC, FH.商家ID desc,FH.城市 desc,FH.日期_公式生成 )) < 20
+                                    OR (fh.订单原价 > 180) then '否' else '是' end) = '否'
+                then '否' else '是' end 是否合规订单,
+
+           1 /   count(客户id) over (partition by 客户id,fh.城市,fh.日期_公式生成)  当日不重复客户ID数,
+           1 /   count(客户id) over (partition by 客户id,fh.日期_公式生成) 当日公司不重复客户ID数,
+           sj.一级品类,
+           sj.二级品类,
+           case when sj.一级品类 in ('美食','甜点','饮品') then '是' else '否' end AS 是否为餐饮,
+          case when FH.城市 is not null then '是' else '否' end AS 是否TD订单
+FROM mt_cdm.合规监控_填报_地推订单 DT
+LEFT JOIN mt_cdm.合规监控_填报_烽火台已送达订单  FH
+ON dt.烽火台订单号=fh.订单号
+left join mt_cdm.合规监控_rpa执行结果表 RPA
+on RPA.订单号 = DT.烽火台订单号
+left join mt_cdm.商家日基础数据 sj
+on fh.商家ID = sj.商家ID
+and str_to_date( replace(sj.日,'-',''), '%Y%m%d')= subdate(STR_TO_DATE(replace(fh.日期_公式生成,'-',''), '%Y%m%d'), interval 1 day)
+left join (
+    SELECT
+	b.外卖组织结构,
+	b.一级商家配送类型,
+	b.一级品类,
+	b.二级品类,
+	b.三级品类,
+	b.商家类型,
+	b.代理商家分级标签 AS '分级',
+	a.营业天数,
+	a.商家ID,
+	b.商家名称,
+	b.合作BD AS 'BD',
+	a.`过去30天`,
+	a.`原价交易额`,
+	a.`实付交易额`,
+	a.`订单量`
+FROM (
+		SELECT
+			CONCAT(DATE_SUB(CURDATE(), INTERVAL 30 DAY), '至', DATE_SUB(CURDATE(), INTERVAL 1 DAY)) AS '过去30天',
+			`商家ID`,
+			COUNT(1) AS '营业天数',
+			ROUND(SUM(原价交易额（GMV）), 2) AS 原价交易额,
+			ROUND(SUM(实付交易额（GMV）), 2) AS 实付交易额,
+			SUM(订单量（GMV）) AS 订单量
+		FROM `商家日基础数据`
+		WHERE
+			STR_TO_DATE(`日`, '%Y%m%d') >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+		GROUP BY
+			`商家ID`
+		) a
+LEFT JOIN `商家组织架构` b ON a.`商家ID` = b.`商家ID`
+) j30
+on fh.商家ID = j30.商家ID
+left join mt_cdm.异常商家明细_月 yc
+on fh.商家ID = yc.商家ID
+and DATE_FORMAT(DATE_SUB(fh.日期_公式生成, INTERVAL 1 MONTH), '%Y%m') = date_format(STR_TO_DATE(CONCAT(yc.月, '01'), '%Y%m%d'), '%Y%m')
+-- left join mt_cdm.合规监控_填报_单据有效时间 yx
+where 1 =1
+and dt.烽火台订单号 not in (select 合规监控_填报_取消的订单.订单号 from mt_cdm.合规监控_填报_取消的订单)  -- 过滤一下取消的订单
+and dt.城市_公式生成 <> '暂无匹配项' -- 过滤一下没有匹配城市的订单
+and dt.status = 1  -- 过滤一下未跑成功的订单
+order by FH.下单时间 ASC, FH.商家ID desc,FH.城市 desc,FH.日期_公式生成
+)
+
+select
+ o.BP,
+ o.三级架构,
+ a.日期_公式生成,
+ count(*) AS 当日订单数,
+ round (sum(a.订单原价),2) as  原价交易额,
+ round (sum(a.订单金额),2) as  实付交易额,
+ round(case when ifnull(sum(a.订单原价),0) = 0 OR count(*) = 0  then 0 else sum(a.订单原价) / count(*) end,2) AS 原价单均价,
+ round(case when ifnull(sum(a.订单金额),0) = 0 OR count(*) = 0  then 0 else sum(a.订单金额) / count(*) end,2) AS 实付单均价,
+ round(sum(a.当日不重复客户ID数),2) as 当日不重复客户ID数,
+ round(case when ifnull(sum(ifnull(a.当日不重复客户ID数,0)),0) = 0 then 0 else  count(*) / sum(ifnull(a.当日不重复客户ID数,0)) end,2) as 下单频次,
+ sum(case  when a.是否合规订单 = '否' then 1 else  0 end)  AS 不合规订单数,
+ CASE WHEN count(*) = 0 THEN 0 ELSE  sum(case  when a.是否合规订单 = '否' then 1 else  0 end)/count(*) END AS 不合规订单量占比,
+ SUM(case when a.是否下单合规 = '否' THEN 1 ELSE 0 END) AS 下单不合规订单数,
+ CASE WHEN  SUM(case when a.是否下单合规 = '否' THEN 1 ELSE 0 END) = 0 THEN 0 ELSE SUM(case when a.是否下单合规 = '否' THEN 1 ELSE 0 END)/  sum(case  when a.是否合规订单 = '否' then 1 else  0 end) END AS 下单不合规订单量占比,
+ sum(case when  近三天出现次数 > 2 then 1 else 0 end) AS 同一客户ID近3天下单次数超2次,
+ sum(case when a.同一客户ID下单间隔天数是否达标 = '是' THEN 1 ELSE  0 end) AS 同一客户ID下单间隔天数是否达标,
+ sum(case when a.近七天出现次数 > 4 then 1 else 0 end) as 同一客户ID近7天下单次数超4次,
+ sum(case when a.收餐地址距离商家导航距离 < 1000 then 1 else 0 end ) as 同一客户ID收餐地址距离商家导航距离小于1000米,
+ sum(case when a.是否商家端合规 = '否' THEN 1 ELSE 0 END) as 商家端不合规数量,
+ case when sum(case  when a.是否合规订单 = '否' then 1 else  0 end) = 0 then 0 else
+ sum(case when a.是否商家端合规 = '否' THEN 1 ELSE 0 END)/sum(case  when a.是否合规订单 = '否' then 1 else  0 end) end AS 商家端不合规数量占比,
+ sum(case when a.单商家当日TD量是否合规 = '否' THEN 1 ELSE 0 END) as 单商家当日订单量不合规,
+ sum(case when a.单商家当日TD原价GMV是否合规 = '否' THEN 1 ELSE 0 END) as 单商家当日订单原价GMV不合规,
+ sum(case when a.是否风控商家 = '是' THEN 1 ELSE 0 END) as 上月风控商家进行订单,
+ sum(case when a.订单原价 > 180 then 1 else 0 end) AS 订单金额超180,
+ SUM(CASE WHEN A.同一商家TD原价重复次数 > 2 THEN 1 ELSE 0 END) AS 同一商家订单原价重复次数超2次,
+ SUM(CASE WHEN a.折扣力度 > 0.2 THEN 1 ELSE 0 END ) as 折扣力度超2折,
+ sum(case when a.下单时间间隔 < 20 THEN 1 ELSE 0 END ) AS 下单时间间隔小于20分钟,
+ SUM(CASE WHEN a.是否配送合规 = '否' THEN 1 ELSE 0 END) as 配送不合规数量,
+ sum(case when a.是否配送合规 = '否' THEN 1 ELSE 0 END)/sum(case  when a.是否合规订单 = '否' then 1 else  0 end) AS 配送不合规订单量占比,
+ sum(case when a.配送时长 < 20 THEN 1 ELSE 0 END) AS 配送时长小于20分钟,
+ sum(case when a.取餐时长 < 8 THEN 1 ELSE 0 END) as 取餐时长小于8分钟,
+ sum(case when a.骑手上报到店距离 > 50 THEN 1 ELSE 0 END) as 骑手上报到店距离大于50米,
+ sum(case when a.送达前是否联系客户 = '否' THEN 1 ELSE 0 END) as 未联系客户,
+ sum(case when a.是否有转单或改派情况 = '是' THEN 1 ELSE 0 END) as 有转单或改派情况,
+ sum(case when a.骑手操作送达距离 > 50 and a.是否有上报异常情况 = '否' THEN 1 ELSE 0 END) as 骑手操作送达距离大于50米未上报异常情况
+from a
+left join mt_cdm.组织架构 o
+on o.烽火台城市名称 = a.城市
+group by  o.BP,
+          o.三级架构,
+          a.日期_公式生成

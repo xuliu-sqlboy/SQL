@@ -1,0 +1,19 @@
+10-29 11:17:05  INFO startUpgrade(:3420) - Start Upgrade
+10-29 11:17:05 DEBUG <init>(smartbi.extension.Extension:141) - Add extension D:\Tomcat\bin\ext\DingdingEx.ext
+10-29 11:17:05  INFO initExtensionSpring(smartbi.extension.spring.SmartbiContextLoaderListener:313) - Load Extension name=dingdingex, alias=DingdingEx, version=1.0, build=[2024-09-03 11:37:29]
+10-29 11:17:05  INFO initWebApplicationContext(org.springframework.web.context.ContextLoader:257) - Root WebApplicationContext: initialization started
+10-29 11:17:05 DEBUG prepareRefresh(smartbi.extension.spring.SmartbiXmlWebApplicationContext:637) - Refreshing Root WebApplicationContext
+10-29 11:17:06 DEBUG getSingleton(smartbi.extension.spring.SmartbiListableBeanFactory:225) - Creating shared instance of singleton bean 'framework'
+10-29 11:17:06 DEBUG getSingleton(smartbi.extension.spring.SmartbiListableBeanFactory:225) - Creating shared instance of singleton bean 'DDModule'
+10-29 11:17:06 DEBUG getSingleton(smartbi.extension.spring.SmartbiListableBeanFactory:225) - Creating shared instance of singleton bean 'rmi'
+10-29 11:17:06  INFO initWebApplicationContext(org.springframework.web.context.ContextLoader:293) - Root WebApplicationContext initialized in 742 ms
+10-29 11:17:06  INFO enable(smartbi.extension.ExtensionHelper:576) - Extension dingdingex enabled.
+10-29 11:17:06 DEBUG clearAll(smartbi.pool.hsqlcache.HSQLDBFileManager:362) - clear all HSQL databases file
+10-29 11:17:07  INFO tranceRequest(smartbix.augmenteddataset.interceptor.LoggingClientHttpRequestInterceptor:37) - ======= request begin ========
+10-29 11:17:07  INFO tranceRequest(smartbix.augmenteddataset.interceptor.LoggingClientHttpRequestInterceptor:39) - POST http://localhost:18081/smartbiolap/smartbiquery, headers: {Accept=[text/plain, application/json, application/*+json, */*], exeMethod=[allServers], Content-Type=[application/json], Content-Length=[300], X-Smartbi-ChainInfo=[TRACE_ID%3D2a6c000388862d9f%26PARENT_TASK_ID%3D64366c42-7a11-4e64-a242-e0fc8837be72]}
+10-29 11:17:07  INFO tranceRequest(smartbix.augmenteddataset.interceptor.LoggingClientHttpRequestInterceptor:41) - ======= request end ========
+10-29 11:17:07 DEBUG printClassLocation(smartbi.connectionpool.ConnectionPool:1885) - Load class [com.mysql.jdbc.Driver] at: file:/D:/Tomcat/webapps/smartbi/WEB-INF/lib/_JDBC_mysql-connector-java-5.1.48.jar
+10-29 11:17:07  INFO traceResponse(smartbix.augmenteddataset.interceptor.LoggingClientHttpRequestInterceptor:45) - ============================response begin==========================================
+10-29 11:17:07  INFO traceResponse(smartbix.augmenteddataset.interceptor.LoggingClientHttpRequestInterceptor:46) - Status code: 200 OK， Headers: {X-Tid=[2a6c000388862d9f], Set-Cookie=[JSESSIONID=1402F37988BED2E851473FA7A14B2967; Path=/smartbiolap; HttpOnly], vary=[accept-encoding], Content-Type=[application/json;charset=UTF-8], Transfer-Encoding=[chunked], Date=[Tue, 29 Oct 2024 03:17:07 GMT], Keep-Alive=[timeout=60], Connection=[keep-alive]}
+10-29 11:17:07  INFO traceResponse(smartbix.augmenteddataset.interceptor.LoggingClientHttpRequestInterceptor:48) - =======================response end=================================================
+10-29 11:17:07 DEBUG startUpgrade(smartbi.config.BIConfigService:3451) - Upgrade failed
