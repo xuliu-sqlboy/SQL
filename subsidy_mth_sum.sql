@@ -1,0 +1,74 @@
+/*
+ Navicat Premium Data Transfer
+
+ Source Server         : Oracle
+ Source Server Type    : Oracle
+ Source Server Version : 110200
+ Source Host           : 192.168.2.80:1521
+ Source Schema         : MT_ODS
+
+ Target Server Type    : Oracle
+ Target Server Version : 110200
+ File Encoding         : 65001
+
+ Date: 27/09/2024 15:16:25
+*/
+
+
+-- ----------------------------
+-- Table structure for subsidy_mth_sum
+-- ----------------------------
+DROP TABLE "MT_ODS"."subsidy_mth_sum";
+CREATE TABLE "MT_ODS"."subsidy_mth_sum" (
+  "PL1" VARCHAR2(255 BYTE),
+  "PL2" VARCHAR2(255 BYTE),
+  "DLBD" VARCHAR2(255 BYTE),
+  "SJLX" VARCHAR2(255 BYTE),
+  "WMZZJG" VARCHAR2(255 BYTE),
+  "SJID" VARCHAR2(255 BYTE),
+  "SJMC" VARCHAR2(255 BYTE),
+  "MTH" NUMBER,
+  "HDYWDLX" VARCHAR2(255 BYTE),
+  "HDDL" VARCHAR2(255 BYTE),
+  "SXHD" VARCHAR2(255 BYTE),
+  "YJJYE" NUMBER(10,2),
+  "SFJYE" NUMBER(10,2),
+  "DDL" NUMBER,
+  "HDDDL" NUMBER,
+  "HDDDLZB" NUMBER(10,4),
+  "HDDDSFJYE" NUMBER(10,2),
+  "HDDDSFJYEZB" NUMBER(10,4),
+  "HDDDYJJJE" NUMBER(10,2),
+  "HDDDYJJJEZB" NUMBER(10,4),
+  "DLSBTJE" NUMBER(10,2),
+  "DLSBTL" NUMBER(10,4),
+  "SJBTJE" NUMBER(10,2),
+  "SJBTL" NUMBER(10,4),
+  "MTBTJE" NUMBER(10,2),
+  "MTBTL" NUMBER(10,4),
+  "SJBGRS" NUMBER,
+  "SJZYBGRS" NUMBER,
+  "BGRDZHL" NUMBER(10,4),
+  "TDYHS" NUMBER,
+  "SJRDXDZHL" NUMBER(10,4),
+  "FMTZLBTJE" NUMBER(10,2),
+  "YJJYEZL" NUMBER(10,2),
+  "SFJYEZL" NUMBER(10,2),
+  "TRCCBYJ" NUMBER(10,2),
+  "TRCCBSF" NUMBER(10,2)
+)
+LOGGING
+NOCOMPRESS
+PCTFREE 10
+INITRANS 1
+STORAGE (
+  INITIAL 65536 
+  NEXT 1048576 
+  MINEXTENTS 1
+  MAXEXTENTS 2147483645
+  BUFFER_POOL DEFAULT
+)
+PARALLEL 1
+NOCACHE
+DISABLE ROW MOVEMENT
+;
