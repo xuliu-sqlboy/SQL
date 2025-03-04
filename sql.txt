@@ -1,0 +1,376 @@
+CREATE DEFINER = root@`%` PROCEDURE pro_计算骑手薪资(IN V_in_骑手id VARCHAR(50), IN V_in_城市 VARCHAR(50), IN V_in_数据年月 INT)
+    MODIFIES SQL DATA
+BEGIN
+    /** edit by allen
+      需要完成点
+        计算方案中 存在 好评计算 涉及有效骑手的定义 估没有完成
+        接下来的做法
+        完善扣款 和 骑手收款方案
+            城市填报流程
+        需要完善 手工调整逻辑 开发一个二次调整流程
+        */
+
+    DECLARE V_主板单量 INT DEFAULT 0;          -- 主板单量
+    DECLARE V_总单量 INT DEFAULT 0;          -- 主板单量
+    DECLARE V_主板提成 DECIMAL(10,2) DEFAULT 0; -- 主板提成
+    DECLARE V_PHF单量 INT DEFAULT 0;           -- PHF单量
+    DECLARE V_主板单量_含PHF INT DEFAULT 0;    -- PHF单量
+    DECLARE V_拼好饭提成 DECIMAL(10,2) DEFAULT 0; -- 拼好饭提成
+    DECLARE V_提成汇总 DECIMAL(10,2) DEFAULT 0; -- 提成汇总
+
+    DECLARE V_PHF直买单 INT DEFAULT 0;  -- PHF直买单
+    DECLARE V_PHF一起送2单 INT DEFAULT 0;
+    DECLARE V_PHF一起送3单 INT DEFAULT 0;
+    DECLARE V_PHF一起送4单 INT DEFAULT 0;
+    DECLARE V_PHF一起送5单 INT DEFAULT 0;
+    DECLARE V_PHF分开送2单 INT DEFAULT 0;
+    DECLARE V_PHF分开送3单 INT DEFAULT 0;
+    DECLARE V_PHF分开送4单 INT DEFAULT 0;
+    DECLARE V_PHF分开送5单 INT DEFAULT 0;
+    DECLARE V_PHF分开送6单 INT DEFAULT 0;
+    DECLARE V_开始时间 TIME;
+    DECLARE V_结束时间 TIME;
+
+    DECLARE V_规则名称 VARCHAR(50);
+    DECLARE V_phf单价 DECIMAL(10,2);
+    DECLARE V_phf_补贴 DECIMAL(10,2);
+    DECLARE V_补贴汇总 DECIMAL(10,2) DEFAULT 0;
+    DECLARE v_社保补贴 DECIMAL(10,2) DEFAULT 0;
+    DECLARE V_距离补贴 DECIMAL(10,2) DEFAULT 0;
+    DECLARE V_时段补贴 DECIMAL(10,2) DEFAULT 0;
+    DECLARE V_好评单量 INT DEFAULT 0;
+    DECLARE V_上月第一天 DATE;
+    DECLARE V_骑手属性 VARCHAR(50);
+    DECLARE V_适用开始月 VARCHAR(50);
+    DECLARE V_适用结束月 VARCHAR(50);
+
+    DECLARE V_主算薪方案id INT DEFAULT 0;
+    DECLARE V_phf算薪方案id INT DEFAULT 0;
+    DECLARE V_补贴PHF_ID INT DEFAULT 0;
+    DECLARE V_距离方案ID INT DEFAULT 0;
+
+    DECLARE V_骑手姓名 VARCHAR(50);
+    DECLARE V_站点ID INT DEFAULT 0;
+    DECLARE V_站点 VARCHAR(50);
+    DECLARE V_合作开始日期 DATE DEFAULT NULL;
+    DECLARE V_身份证号码 VARCHAR(100);
+    DECLARE V_终止合作日期 DATE;
+    DECLARE V_骑手类型 VARCHAR(50);
+
+    DECLARE V_最小值 DECIMAL(10,2) DEFAULT 0;
+    DECLARE V_最大值 DECIMAL(10,2) DEFAULT 0;
+    DECLARE V_单价 DECIMAL(10,2) DEFAULT 0;
+    DECLARE V_补贴 DECIMAL(10,2) DEFAULT 0;
+    DECLARE V_额外补贴 DECIMAL(10,2) DEFAULT 0;
+    DECLARE V_最低出勤天数 INT DEFAULT 0;
+    DECLARE V_最低订单数 INT DEFAULT 0;
+    DECLARE V_适用骑手属性 VARCHAR(20);
+    DECLARE previous_max DECIMAL(10,2) DEFAULT 0;
+
+    DECLARE done, done2, done3, done4, done5 INT DEFAULT 0;
+
+    DECLARE cur CURSOR FOR
+        SELECT 最小值, 最大值, 单价, 额外补贴, 最低出勤天数, 最低订单数, 适用骑手属性
+        FROM mt_cdm.骑手算薪_薪酬方案规则表
+        WHERE 方案ID = V_主算薪方案id
+        ORDER BY 最小值 ASC;
+
+    DECLARE cur_phf CURSOR FOR
+        SELECT 规则名称, 单价
+        FROM mt_cdm.骑手算薪_薪酬方案规则表
+        WHERE 方案ID = V_phf算薪方案id
+        ORDER BY 规则名称 ASC;
+
+    DECLARE cur_juli CURSOR FOR
+        SELECT 最小值, 最大值, 单价
+        FROM mt_cdm.骑手算薪_薪酬方案规则表
+        WHERE 方案ID = V_距离方案ID
+        ORDER BY 最小值;
+
+    DECLARE cur_haoping CURSOR FOR
+        SELECT 适用月份_开始月份, 适用月份_结束月份, 最低订单数, 最低出勤天数, 单价, 适用骑手属性
+        FROM mt_cdm.骑手算薪_薪酬方案规则表
+        WHERE 方案ID = V_haoping方案ID
+        ORDER BY 适用月份_开始月份;
+
+    DECLARE CONTINUE HANDLER FOR SQLEXCEPTION
+    BEGIN
+        DECLARE error_message VARCHAR(255);
+        DECLARE error_code VARCHAR(50);
+
+        GET DIAGNOSTICS CONDITION 1
+            error_code = RETURNED_SQLSTATE, error_message = MESSAGE_TEXT;
+
+        SELECT CONCAT('存储过程执行出错：错误码 - ', error_code, ', 错误信息 - ', error_message) AS '错误信息';
+    END;
+
+    /**基本信息查询*/
+    SELECT qs_name.骑手,
+           qs_name.站点ID,
+           qs_name.站点,
+           zcrq.注册日期 AS 合作开始日期,
+           ryjbxx.身份证号码,
+           CASE WHEN ryjbxx.离职时间 = 'NULL' OR ryjbxx.离职时间 IS NULL THEN NULL
+                ELSE ryjbxx.离职时间 END AS 终止合作日期,
+           ryjbxx.人员性质 AS 骑手类型
+    INTO V_骑手姓名, V_站点ID, V_站点, V_合作开始日期, V_身份证号码, V_终止合作日期, V_骑手类型
+    FROM (
+             SELECT 骑手ID, 骑手, 站点ID, 站点
+             FROM (
+                      SELECT 骑手ID,
+                             骑手,
+                             站点ID,
+                             站点,
+                             ROW_NUMBER() OVER (PARTITION BY 骑手ID ORDER BY COUNT(*) DESC) rk
+                      FROM mt_cdm.骑手算薪_订单详情
+                      WHERE 城市 LIKE CONCAT(V_in_城市, '%')
+                        AND 创建日期 BETWEEN DATE_FORMAT(CONCAT(V_in_数据年月, '01'), '%Y-%m-%d')
+                          AND LAST_DAY(DATE_FORMAT(CONCAT(V_in_数据年月, '01'), '%Y-%m-%d'))
+                        AND 骑手ID != 0
+                        AND 状态 = '已送达'
+                        AND 组织类型 != '众包'
+                        AND 骑手ID = V_in_骑手id
+                      GROUP BY 骑手ID, 骑手, 站点ID, 站点
+                  ) t
+             WHERE rk = 1
+         ) qs_name
+             LEFT JOIN mt_cdm.骑手算薪_注册日期 zcrq ON qs_name.骑手ID = zcrq.骑手ID
+             LEFT JOIN mt_cdm.骑手算薪_人员基本信息 ryjbxx ON ryjbxx.人员ID = qs_name.骑手ID
+    WHERE zcrq.骑手ID = V_in_骑手id
+      AND zcrq.数据年月 = V_in_数据年月
+      AND ryjbxx.数据年月 = V_in_数据年月;
+
+    -- 获取骑手的总单量（不包括PHF单量）
+    SELECT COALESCE(SUM(配送完成运单量), 0)
+    INTO V_总单量
+    FROM mt_cdm.骑手算薪_单量_总单量
+    WHERE 骑手ID = V_in_骑手id
+      AND 数据年月 = V_in_数据年月;
+
+    -- 获取PHF单量及相关参数
+    SELECT COALESCE(SUM(
+                        IFNULL(配送完成拼好饭非拼单运单量, 0) +
+                        IFNULL(拼单一起送1人拼完单量（拼单退单）, 0) +
+                        IFNULL(拼单一起送2人拼完单量, 0) +
+                        IFNULL(拼单一起送3人拼完单量, 0) +
+                        IFNULL(拼单一起送4人拼, 0) +
+                        IFNULL(拼单一起送5人拼完单量, 0) +
+                        IFNULL(拼单分开送2人拼完单量, 0) +
+                        IFNULL(拼单分开送3人拼完单量, 0) +
+                        IFNULL(拼单分开送4人拼, 0) +
+                        IFNULL(拼单分开送5人拼完单量, 0) +
+                        IFNULL(拼单分开送6人拼完单量, 0)
+                    ), 0) AS PHF单量,
+           COALESCE(SUM(IFNULL(配送完成拼好饭非拼单运单量, 0) + IFNULL(拼单一起送1人拼完单量（拼单退单）, 0)), 0) AS PHF直买单,
+           COALESCE(SUM(IFNULL(拼单一起送2人拼完单量, 0)), 0) AS PHF一起送2单,
+           COALESCE(SUM(IFNULL(拼单一起送3人拼完单量, 0)), 0) AS PHF一起送3单,
+           COALESCE(SUM(IFNULL(拼单一起送4人拼, 0)), 0) AS PHF一起送4单,
+           COALESCE(SUM(IFNULL(拼单一起送5人拼完单量, 0)), 0) AS PHF一起送5单,
+           COALESCE(SUM(IFNULL(拼单分开送2人拼完单量, 0)), 0) AS PHF分开送2单,
+           COALESCE(SUM(IFNULL(拼单分开送3人拼完单量, 0)), 0) AS PHF分开送3单,
+           COALESCE(SUM(IFNULL(拼单分开送4人拼, 0)), 0) AS PHF分开送4单,
+           COALESCE(SUM(IFNULL(拼单分开送5人拼完单量, 0)), 0) AS PHF分开送5单,
+           COALESCE(SUM(IFNULL(拼单分开送6人拼完单量, 0)), 0) AS PHF分开送6单
+    INTO V_PHF单量, V_PHF直买单, V_PHF一起送2单, V_PHF一起送3单, V_PHF一起送4单, V_PHF一起送5单, V_PHF分开送2单, V_PHF分开送3单, V_PHF分开送4单, V_PHF分开送5单, V_PHF分开送6单
+    FROM mt_cdm.骑手算薪_拼好饭监控
+    WHERE 骑手ID = V_in_骑手id
+      AND 物理城市 LIKE CONCAT(V_in_城市, '%')
+      AND 数据年月 = V_in_数据年月;
+
+    -- 计算主板单量（总单量 + PHF单量）
+    SET V_主板单量 = IFNULL(V_总单量, 0) - IFNULL(V_PHF单量, 0);
+
+    -- 查找主板方案
+    SELECT 方案ID INTO V_主算薪方案id
+    FROM mt_cdm.骑手算薪_薪酬方案主表
+    WHERE 方案类型 = '单量-主板单量'
+      AND 城市 = V_in_城市
+      AND DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-01') BETWEEN 生效日期 AND 截止日期;
+
+    -- 计算主板提成（根据阶梯制）
+    OPEN cur;
+    read_loop: LOOP
+        FETCH cur INTO V_最小值, V_最大值, V_单价, V_额外补贴, V_最低出勤天数, V_最低订单数, V_适用骑手属性;
+        IF done THEN
+            IF V_最大值 IS NULL AND V_主板单量 > previous_max THEN
+                SET V_主板提成 = V_主板提成 + (V_主板单量 - previous_max) * V_单价;
+            END IF;
+            LEAVE read_loop;
+        END IF;
+        IF V_主板单量 > V_最大值 THEN
+            SET V_补贴 = (V_最大值 - previous_max) * V_单价;
+            SET previous_max = V_最大值;
+        ELSEIF V_主板单量 > previous_max THEN
+            SET V_补贴 = (V_主板单量 - previous_max) * V_单价;
+            SET previous_max = V_主板单量;
+        ELSE
+            SET V_补贴 = 0;
+        END IF;
+        SET V_主板提成 = V_主板提成 + V_补贴;
+    END LOOP;
+    CLOSE cur;
+
+    -- 查找PHF方案ID
+    SELECT 方案ID INTO V_phf算薪方案id
+    FROM mt_cdm.骑手算薪_薪酬方案主表
+    WHERE 方案类型 = '单量-PHF单量'
+      AND 城市 = V_in_城市
+      AND DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-01') BETWEEN 生效日期 AND 截止日期;
+
+    -- 计算PHF提成
+    OPEN cur_phf;
+    read_loop_PHF: LOOP
+        FETCH cur_phf INTO V_规则名称, V_phf单价;
+        IF done2 THEN
+            LEAVE read_loop_PHF;
+        END IF;
+        CASE V_规则名称
+            WHEN '直买单' THEN
+                SET V_拼好饭提成 = V_拼好饭提成 + V_PHF直买单 * V_phf单价;
+            WHEN '拼单一起送2单' THEN
+                SET V_拼好饭提成 = V_拼好饭提成 + V_PHF一起送2单 * V_phf单价;
+            WHEN '拼单一起送3单' THEN
+                SET V_拼好饭提成 = V_拼好饭提成 + V_PHF一起送3单 * V_phf单价;
+            WHEN '拼单一起送4单' THEN
+                SET V_拼好饭提成 = V_拼好饭提成 + V_PHF一起送4单 * V_phf单价;
+            WHEN '拼单一起送5单' THEN
+                SET V_拼好饭提成 = V_拼好饭提成 + V_PHF一起送5单 * V_phf单价;
+            WHEN '拼单分开送2单' THEN
+                SET V_拼好饭提成 = V_拼好饭提成 + V_PHF分开送2单 * V_phf单价;
+            WHEN '拼单分开送3单' THEN
+                SET V_拼好饭提成 = V_拼好饭提成 + V_PHF分开送3单 * V_phf单价;
+            WHEN '拼单分开送4单' THEN
+                SET V_拼好饭提成 = V_拼好饭提成 + V_PHF分开送4单 * V_phf单价;
+            WHEN '拼单分开送5单' THEN
+                SET V_拼好饭提成 = V_拼好饭提成 + V_PHF分开送5单 * V_phf单价;
+            WHEN '拼单分开送6单' THEN
+                SET V_拼好饭提成 = V_拼好饭提成 + V_PHF分开送6单 * V_phf单价;
+        END CASE;
+    END LOOP;
+    CLOSE cur_phf;
+
+    -- 计算提成汇总
+    SET V_提成汇总 = V_主板提成 + V_拼好饭提成;
+
+    -- 计算补贴
+    SET v_社保补贴 = V_总单量 * 1;
+
+    -- 查询距离补贴方案ID
+    SELECT 方案ID INTO V_距离方案ID
+    FROM mt_cdm.骑手算薪_薪酬方案主表
+    WHERE 方案类型 = '补贴-距离'
+      AND 城市 LIKE CONCAT(V_in_城市, '%')
+      AND DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-01') BETWEEN 生效日期 AND 截止日期;
+
+    -- 计算距离补贴
+    OPEN cur_juli;
+    read_loop_juli: LOOP
+        FETCH cur_juli INTO V_最小值, V_最大值, V_单价;
+        IF done3 THEN
+            LEAVE read_loop_juli;
+        END IF;
+        SET V_当前区间订单数 = (
+            SELECT COUNT(*)
+            FROM mt_cdm.骑手算薪_订单详情
+            WHERE 导航距离 >= V_最小值 * 1000
+              AND (导航距离 < V_最大值 * 1000 OR V_最大值 IS NULL)
+              AND 城市 LIKE CONCAT(V_in_城市, '%')
+              AND 创建日期 BETWEEN DATE_FORMAT(CONCAT(V_in_数据年月, '01'), '%Y-%m-%d') AND LAST_DAY(DATE_FORMAT(CONCAT(V_in_数据年月, '01'), '%Y-%m-%d'))
+              AND 骑手ID = V_in_骑手id
+              AND 状态 = '已送达'
+              AND 组织类型 != '众包'
+        );
+        SET V_距离补贴 = V_距离补贴 + (V_当前区间订单数 * V_单价);
+    END LOOP;
+    CLOSE cur_juli;
+
+    -- 查询时段补贴方案ID
+    SELECT 方案ID INTO V_时段方案ID
+    FROM mt_cdm.骑手算薪_薪酬方案主表
+    WHERE 方案类型 = '补贴-时段'
+      AND 城市 LIKE CONCAT(V_in_城市, '%')
+      AND DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-01') BETWEEN 生效日期 AND 截止日期;
+
+    -- 计算时段补贴
+    OPEN cur_juli;
+    read_loop_juli: LOOP
+        FETCH cur_juli INTO V_开始时间, V_结束时间, V_单价;
+        IF done4 THEN
+            LEAVE read_loop_juli;
+        END IF;
+        SET V_时段补贴单量 = (
+            SELECT COUNT(*)
+            FROM mt_cdm.骑手算薪_订单详情
+            WHERE DATE_FORMAT(下单时间, '%H:%i:%s') BETWEEN V_开始时间 AND V_结束时间
+              AND 城市 LIKE CONCAT(V_in_城市, '%')
+              AND 创建日期 BETWEEN DATE_FORMAT(CONCAT(V_in_数据年月, '01'), '%Y-%m-%d') AND LAST_DAY(DATE_FORMAT(CONCAT(V_in_数据年月, '01'), '%Y-%m-%d'))
+              AND 骑手ID = V_in_骑手id
+              AND 状态 = '已送达'
+              AND 组织类型 != '众包'
+        );
+        SET V_时段补贴 = V_时段补贴 + (V_时段补贴单量 * V_单价);
+    END LOOP;
+    CLOSE cur_juli;
+
+    -- 查询好评补贴方案ID
+    SELECT 方案ID INTO V_haoping方案ID
+    FROM mt_cdm.骑手算薪_薪酬方案主表
+    WHERE 方案类型 = '补贴-好评'
+      AND 城市 LIKE CONCAT(V_in_城市, '%')
+      AND DATE_FORMAT(CURDATE() - INTERVAL 1 MONTH, '%Y-%m-01') BETWEEN 生效日期 AND 截止日期;
+
+    -- 计算好评补贴
+    OPEN cur_haoping;
+    read_loop_haoping: LOOP
+        FETCH cur_haoping INTO V_适用开始月, V_适用结束月, V_最低订单数, V_最低出勤天数, V_单价, V_适用骑手属性;
+        IF done5 THEN
+            LEAVE read_loop_haoping;
+        END IF;
+        -- 判断当前数据年月是否在适用月份范围内
+        IF V_in_数据年月 BETWEEN V_适用开始月 AND V_适用结束月 THEN
+            -- 计算好评订单数
+            SET V_好评单量 = (
+                SELECT COUNT(*)
+                FROM mt_cdm.骑手算薪_订单详情
+                WHERE 城市 = V_in_城市
+                  AND DATE_FORMAT(创建日期, '%Y%m') = V_in_数据年月
+                  AND 骑手ID = V_in_骑手id
+                  AND 评价 = '好评'
+                  AND 状态 = '已送达'
+            );
+            -- 计算出勤天数（老骑手需要）
+            IF V_骑手属性 = '老骑手' THEN
+                SET V_出勤天数 = (
+                    SELECT COUNT(DISTINCT DATE(创建日期))
+                    FROM mt_cdm.骑手算薪_订单详情
+                    WHERE 城市 = V_in_城市
+                      AND DATE_FORMAT(创建日期, '%Y%m') = V_in_数据年月
+                      AND 骑手ID = V_in_骑手id
+                );
+            ELSE
+                SET V_出勤天数 = 0;
+            END IF;
+            -- 判断是否满足奖励条件
+            IF V_好评单量 >= V_最低订单数 AND (V_骑手属性 = '新骑手' OR V_出勤天数 >= V_最低出勤天数) THEN
+                SET V_好评补贴 = V_好评补贴 + (V_好评单量 * V_单价);
+            END IF;
+        END IF;
+    END LOOP;
+    CLOSE cur_haoping;
+
+    -- 计算补贴汇总
+    SET V_补贴汇总 = V_phf_补贴 + v_社保补贴 + V_距离补贴 + V_时段补贴 + V_好评补贴;
+
+    -- 插入薪资记录
+    INSERT INTO mt_cdm.骑手薪资记录表 (
+        骑手ID, 骑手姓名, 站点ID, 站点名称, 城市, 合作开始日期, 身份证号码, 终止合作日期, 骑手类型, 薪资日期,
+        单量_主板_方案ID, 总单量, 主板单量, PHF单量, 总单量_含PHF, 单量提成, 创建时间, PHF直买单, PHF一起送2单, PHF一起送3单, PHF一起送4单, PHF一起送5单, PHF分开送2单, PHF分开送3单, PHF分开送4单, PHF分开送5单, PHF分开送6单, PHF提成, 社保补贴, 距离补贴, 时段补贴, phf补贴, 补贴合计, 薪资年月, 提成合计
+    )
+    VALUES (
+        V_in_骑手id, V_骑手姓名, V_站点ID, V_站点, V_in_城市, V_合作开始日期, V_身份证号码, V_终止合作日期, V_骑手类型, CURRENT_DATE(),
+        V_主算薪方案id, V_总单量, V_主板单量, V_PHF单量, V_总单量 + 0, V_主板提成, CURRENT_TIMESTAMP(),
+        V_PHF直买单, V_PHF一起送2单, V_PHF一起送3单, V_PHF一起送4单, V_PHF一起送5单, V_PHF分开送2单, V_PHF分开送3单, V_PHF分开送4单, V_PHF分开送5单, V_PHF分开送6单, V_拼好饭提成,
+        V_社保补贴, V_距离补贴, V_时段补贴, V_phf_补贴, V_补贴汇总, V_in_数据年月, V_提成汇总
+    );
+
+END;
